@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using TMPro;
 
@@ -7,79 +6,101 @@ public class MenuManager : MonoBehaviour
 {
     public static MenuManager Instance;
 
-    [Header("Referencias de UI")]
-    [SerializeField] private TMP_InputField nameInputField;
-    [SerializeField] private TMP_Text bestScoreText;
+    [Header("Datos de Jugador")]
+    public string playerName = "Player";
+    [SerializeField] private TMP_InputField nameInput;
+    [SerializeField] private TextMeshProUGUI recordText;
 
-    [Header("Datos Persistentes")]
-    public string playerName;
-    public string bestPlayerName;
-    public int bestScore;
+    [Header("Paneles UI")]
+    [SerializeField] private GameObject panelInstrucciones;
 
-    private void Awake()
+    void Awake()
     {
-        if (Instance != null)
-        {
-            Destroy(gameObject);
-            return;
-        }
-
+        // Instancia simple por escena, asegurando tiempo normal
         Instance = this;
-        DontDestroyOnLoad(gameObject);
-
-        CargarDatos();
+        Time.timeScale = 1f;
     }
 
-    private void Start()
+    void Start()
     {
-        ActualizarTextoMejorPuntaje();
-    }
-
-    public void OnStartGamePressed()
-    {
-        if (nameInputField != null && !string.IsNullOrWhiteSpace(nameInputField.text))
+        // Cargar el nombre si ya se había guardado previamente
+        if (PlayerPrefs.HasKey("PlayerName"))
         {
-            playerName = nameInputField.text.Trim();
-        }
-        else
-        {
-            playerName = "Player";
+            playerName = PlayerPrefs.GetString("PlayerName");
+            if (nameInput != null)
+            {
+                nameInput.text = playerName;
+            }
         }
 
-        SceneManager.LoadScene(1); // Carga la escena del juego (SampleScene)
+        CargarRecord();
+
+        if (panelInstrucciones != null)
+        {
+            panelInstrucciones.SetActive(false);
+        }
     }
 
-    public void ActualizarTextoMejorPuntaje()
+    private void GuardarNombre()
     {
-        if (bestScoreText != null)
+        if (nameInput != null && !string.IsNullOrEmpty(nameInput.text))
         {
-            if (bestScore > 0)
-            {
-                bestScoreText.text = $"Mejor Puntaje: {bestPlayerName} : {bestScore}";
-            }
-            else
-            {
-                bestScoreText.text = "Mejor Puntaje: 0";
-            }
+            playerName = nameInput.text;
+            PlayerPrefs.SetString("PlayerName", playerName);
+            PlayerPrefs.Save();
+        }
+    }
+
+    // Botón Nivel 1 (Escena 'main')
+    public void JugarNivel1()
+    {
+        GuardarNombre();
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(1);
+    }
+
+    // Botón Nivel 2 (Escena 'Nivel2')
+    public void JugarNivel2()
+    {
+        GuardarNombre();
+        Time.timeScale = 1f;
+        SceneManager.LoadScene(2);
+    }
+
+    // Botón ¿CÓMO JUGAR?
+    public void MostrarInstrucciones()
+    {
+        if (panelInstrucciones != null)
+        {
+            panelInstrucciones.SetActive(true);
+        }
+    }
+
+    // Botón ENTENDIDO / VOLVER
+    public void OcultarInstrucciones()
+    {
+        if (panelInstrucciones != null)
+        {
+            panelInstrucciones.SetActive(false);
         }
     }
 
     public void GuardarNuevoRecord(int nuevoPuntaje)
     {
-        if (nuevoPuntaje > bestScore)
+        int recordActual = PlayerPrefs.GetInt("RecordEcoCredits", 0);
+        if (nuevoPuntaje > recordActual)
         {
-            bestScore = nuevoPuntaje;
-            bestPlayerName = playerName;
-
-            PlayerPrefs.SetInt("BestScore", bestScore);
-            PlayerPrefs.SetString("BestPlayer", bestPlayerName);
+            PlayerPrefs.SetInt("RecordEcoCredits", nuevoPuntaje);
             PlayerPrefs.Save();
         }
     }
 
-    private void CargarDatos()
+    private void CargarRecord()
     {
-        bestScore = PlayerPrefs.GetInt("BestScore", 0);
-        bestPlayerName = PlayerPrefs.GetString("BestPlayer", "");
+        int record = PlayerPrefs.GetInt("RecordEcoCredits", 0);
+        if (recordText != null)
+        {
+            recordText.text = $"Mejor Puntaje: {record}";
+        }
     }
 }

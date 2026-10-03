@@ -15,7 +15,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private GameObject returnButton;       // Botón para volver al menú principal (Victoria)
 
     [Header("UI Derrota (Game Over)")]
-    [SerializeField] private GameObject gameOverPanel;      // Panel GameOver con imagen y botón Reintentar
+    [SerializeField] private GameObject gameOverPanel;      // Panel GameOver con imagen y botones
 
     [Header("Efectos de Audio")]
     [SerializeField] private AudioSource audioSource;
@@ -50,8 +50,12 @@ public class GameManager : MonoBehaviour
         // Reanudar el tiempo si venía pausado de una partida previa
         Time.timeScale = 1f;
 
-        // 1. Obtener el nombre del jugador que viene desde la escena de Menú
-        if (MenuManager.Instance != null && !string.IsNullOrEmpty(MenuManager.Instance.playerName))
+        // 1. Obtener el nombre del jugador (busca primero en PlayerPrefs y luego en MenuManager)
+        if (PlayerPrefs.HasKey("PlayerName"))
+        {
+            activePlayerName = PlayerPrefs.GetString("PlayerName");
+        }
+        else if (MenuManager.Instance != null && !string.IsNullOrEmpty(MenuManager.Instance.playerName))
         {
             activePlayerName = MenuManager.Instance.playerName;
         }
@@ -87,11 +91,8 @@ public class GameManager : MonoBehaviour
             audioSource.PlayOneShot(sonidoDescargaBoya);
         }
 
-        // Guardar récord en tiempo real cada vez que descargas residuos
-        if (MenuManager.Instance != null)
-        {
-            MenuManager.Instance.GuardarNuevoRecord(ecoCredits);
-        }
+        // Guardar récord en tiempo real
+        GuardarRecordLocal(ecoCredits);
 
         UpdateScoreUI();
         CheckWinCondition();
@@ -126,10 +127,7 @@ public class GameManager : MonoBehaviour
 
     private void ShowVictory()
     {
-        if (MenuManager.Instance != null)
-        {
-            MenuManager.Instance.GuardarNuevoRecord(ecoCredits);
-        }
+        GuardarRecordLocal(ecoCredits);
 
         // Reproducir sonido de victoria
         if (audioSource != null && sonidoVictoria != null)
@@ -153,10 +151,7 @@ public class GameManager : MonoBehaviour
     // Se ejecuta al agotarse la batería o por daño letal
     public void GameOver()
     {
-        if (MenuManager.Instance != null)
-        {
-            MenuManager.Instance.GuardarNuevoRecord(ecoCredits);
-        }
+        GuardarRecordLocal(ecoCredits);
 
         // Reproducir sonido de derrota
         if (audioSource != null && sonidoDerrota != null)
@@ -164,7 +159,7 @@ public class GameManager : MonoBehaviour
             audioSource.PlayOneShot(sonidoDerrota);
         }
 
-        // Muestra el panel con la imagen y el botón de Reintentar
+        // Muestra el panel con los botones de Reintentar y Volver al Menú
         if (gameOverPanel != null)
         {
             gameOverPanel.SetActive(true);
@@ -189,13 +184,24 @@ public class GameManager : MonoBehaviour
     // Método para cargar la escena de Menú (índice 0 en Build Settings)
     public void ReturnToMenu()
     {
-        Time.timeScale = 1f;
+        Time.timeScale = 1f; // Reanuda el tiempo antes de regresar
+        GuardarRecordLocal(ecoCredits);
+        SceneManager.LoadScene(0);
+    }
+
+    // Método auxiliar seguro para almacenar récord
+    private void GuardarRecordLocal(int puntaje)
+    {
+        int recordActual = PlayerPrefs.GetInt("RecordEcoCredits", 0);
+        if (puntaje > recordActual)
+        {
+            PlayerPrefs.SetInt("RecordEcoCredits", puntaje);
+            PlayerPrefs.Save();
+        }
 
         if (MenuManager.Instance != null)
         {
-            MenuManager.Instance.GuardarNuevoRecord(ecoCredits);
+            MenuManager.Instance.GuardarNuevoRecord(puntaje);
         }
-
-        SceneManager.LoadScene(0);
     }
 }
