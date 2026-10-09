@@ -1,34 +1,54 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 public class PlayerController : MonoBehaviour
 {
-    [Header("Ajustes de Movimiento e Inercia")]
+    [Header("Ajustes de Movimiento")]
     [SerializeField] private float moveSpeed = 5f;
     [SerializeField] private float boostMultiplier = 1.6f;
 
+    [Header("Orientación de Costado")]
+    [SerializeField] private float rotacionBaseZ = -90f;
+
+    [Header("Sistema de Vidas / Casco")]
+    [SerializeField] private int maxVidas = 3;
+    [SerializeField] private float tiempoInvulnerabilidad = 1.5f;
+    [SerializeField] private TextMeshProUGUI vidasText;
+    [SerializeField] private AudioClip sonidoDanio;
+    private int vidasActuales;
+    private bool esInvulnerable = false;
+
     [Header("Capacidad de Bodega")]
-    // ENCAPSULATION
     [SerializeField] private int maxCargoCapacity = 3;
     private int currentCargo = 0;
 
     [Header("Sistema de Batería")]
     [SerializeField] private float maxBattery = 100f;
-    [SerializeField] private float baseDrainRate = 2.5f;   // Consumo por segundo al moverse
-    [SerializeField] private float boostDrainRate = 7.0f;  // Consumo por segundo con turbo
+    [SerializeField] private float baseDrainRate = 2.5f;
+    [SerializeField] private float boostDrainRate = 7.0f;
     [SerializeField] private Slider batterySlider;
 
-    [Header("Efectos de Audio del Jugador")]
-    [SerializeField] private AudioClip sonidoRecoleccion; // Clip de burbuja / recolección
+    [Header("Sistema de Proyectiles y Luz")]
+    [SerializeField] private GameObject prefabProyectil;
+    [SerializeField] private Transform puntoDisparo;
+    [SerializeField] private Transform luzSubmarino;
+    [SerializeField] private float costoEnergiaDisparo = 2.0f;
+    [SerializeField] private AudioClip sonidoDisparo;
 
+    [Header("Efectos de Audio del Jugador")]
+    [SerializeField] private AudioClip sonidoRecoleccion;
+
+    private SpriteRenderer spriteRenderer;
     private AudioSource audioSource;
     private float currentBattery;
     private Rigidbody2D rb;
     private Vector2 moveInput;
     private bool isBoosting;
     private bool isDead = false;
+    private bool mirandoDerecha = true;
 
-    // ENCAPSULATION: Getters públicos con protección de datos
     public int MaxCargoCapacity => maxCargoCapacity;
     public int CurrentCargo => currentCargo;
 
@@ -36,7 +56,18 @@ public class PlayerController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody2D>();
         audioSource = GetComponent<AudioSource>();
+        spriteRenderer = GetComponent<SpriteRenderer>();
+
         currentBattery = maxBattery;
+        vidasActuales = maxVidas;
+
+        if (rb != null)
+        {
+            rb.freezeRotation = true;
+        }
+
+        transform.localScale = Vector3.one;
+        ActualizarRotacionVisual();
 
         if (batterySlider != null)
         {
@@ -44,6 +75,7 @@ public class PlayerController : MonoBehaviour
             batterySlider.value = currentBattery;
         }
 
+        ActualizarUIVidas();
         UpdateCargoDisplay();
     }
 
@@ -55,12 +87,22 @@ public class PlayerController : MonoBehaviour
         float moveY = Input.GetAxisRaw("Vertical");
         moveInput = new Vector2(moveX, moveY).normalized;
 
-        // Propulsión turbo con Shift o Espacio
         isBoosting = (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.Space)) && moveInput.sqrMagnitude > 0;
 
-        if (moveX != 0)
+        if (moveX > 0.05f && !mirandoDerecha)
         {
-            transform.localScale = new Vector3(Mathf.Sign(moveX), 1, 1);
+            mirandoDerecha = true;
+            ActualizarRotacionVisual();
+        }
+        else if (moveX < -0.05f && mirandoDerecha)
+        {
+            mirandoDerecha = false;
+            ActualizarRotacionVisual();
+        }
+
+        if (Input.GetKeyDown(KeyCode.F) || Input.GetMouseButtonDown(0))
+        {
+            Disparar();
         }
 
         GestorBateria();
@@ -78,6 +120,92 @@ public class PlayerController : MonoBehaviour
         float finalSpeed = (isBoosting ? moveSpeed * boostMultiplier : moveSpeed) * weightPenalty;
 
         rb.linearVelocity = moveInput * finalSpeed;
+    }
+
+    private void ActualizarRotacionVisual()
+    {
+        float rotacionY = mirandoDerecha ? 0f : 180f;
+        transform.rotation = Quaternion.Euler(0f, rotacionY, rotacionBaseZ);
+    }
+
+    private void Disparar()
+    {
+        if (prefabProyectil == null || puntoDisparo == null) return;
+
+        if (currentBattery > costoEnergiaDisparo)
+        {
+            currentBattery -= costoEnergiaDisparo;
+
+            if (batterySlider != null)
+            {
+                batterySlider.value = currentBattery;
+            }
+
+            Vector2 direccionDisparo = (luzSubmarino != null) ? (Vector2)luzSubmarino.up : (mirandoDerecha ? Vector2.right : Vector2.left);
+
+            GameObject bala = Instantiate(prefabProyectil, puntoDisparo.position, Quaternion.identity);
+            ProyectilDron proyectilScript = bala.GetComponent<ProyectilDron>();
+            if (proyectilScript != null)
+            {
+                proyectilScript.ConfigurarDireccion(direccionDisparo);
+            }
+
+            if (audioSource != null && sonidoDisparo != null)
+            {
+                audioSource.PlayOneShot(sonidoDisparo);
+            }
+        }
+    }
+
+    public void RecibirDanio(int danio = 1)
+    {
+        if (isDead || esInvulnerable) return;
+
+        vidasActuales -= danio;
+        ActualizarUIVidas();
+
+        if (audioSource != null && sonidoDanio != null)
+        {
+            audioSource.PlayOneShot(sonidoDanio);
+        }
+
+        if (vidasActuales <= 0)
+        {
+            Morir();
+        }
+        else if (gameObject.activeInHierarchy)
+        {
+            StartCoroutine(EfectoInvulnerabilidad());
+        }
+    }
+
+    private IEnumerator EfectoInvulnerabilidad()
+    {
+        esInvulnerable = true;
+        float tiempoFin = Time.time + tiempoInvulnerabilidad;
+
+        while (Time.time < tiempoFin)
+        {
+            if (spriteRenderer != null)
+            {
+                spriteRenderer.enabled = !spriteRenderer.enabled;
+            }
+            yield return new WaitForSeconds(0.1f);
+        }
+
+        if (spriteRenderer != null)
+        {
+            spriteRenderer.enabled = true;
+        }
+        esInvulnerable = false;
+    }
+
+    private void ActualizarUIVidas()
+    {
+        if (vidasText != null)
+        {
+            vidasText.text = $"Vidas: {vidasActuales}/{maxVidas}";
+        }
     }
 
     private void GestorBateria()
@@ -122,7 +250,6 @@ public class PlayerController : MonoBehaviour
         {
             batterySlider.value = currentBattery;
         }
-        Debug.Log("¡Batería recargada al 100% en la Boya!");
     }
 
     public bool AddCargo(int amount)
@@ -132,7 +259,6 @@ public class PlayerController : MonoBehaviour
             currentCargo += amount;
             UpdateCargoDisplay();
 
-            // Reproduce el sonido de recolección si hay espacio y se guardó el residuo
             if (audioSource != null && sonidoRecoleccion != null)
             {
                 audioSource.PlayOneShot(sonidoRecoleccion);
@@ -147,14 +273,12 @@ public class PlayerController : MonoBehaviour
     {
         if (isDead) return;
 
-        // 1. Colisión con peligros ambientales
-        if (collision.CompareTag("Hazard"))
+        if (collision.CompareTag("Enemigo"))
         {
-            Morir();
+            RecibirDanio(1);
             return;
         }
 
-        // 2. Recolección de residuos (solo si la bodega no está llena)
         if (collision.CompareTag("Trash") && currentCargo < maxCargoCapacity)
         {
             TrashItem item = collision.GetComponent<TrashItem>();
@@ -165,7 +289,6 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // 3. Descarga en la Boya y recarga de batería
         if (collision.CompareTag("Buoy"))
         {
             RechargeBattery();
@@ -179,7 +302,6 @@ public class PlayerController : MonoBehaviour
 
                 currentCargo = 0;
                 UpdateCargoDisplay();
-                Debug.Log("¡Residuos descargados en la Boya con éxito!");
             }
         }
     }

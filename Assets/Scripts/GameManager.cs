@@ -1,31 +1,48 @@
+using System.Collections;
 using UnityEngine;
 using TMPro;
+using UnityEngine.UI;
 using UnityEngine.SceneManagement;
+using UnityEngine.Rendering.Universal;
 
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance;
 
     [Header("UI Textos")]
-    [SerializeField] private TextMeshProUGUI scoreText;      // Muestra Jugador, EcoCréditos y descargados
-    [SerializeField] private TextMeshProUGUI cargoText;      // Muestra Bodega (ej: 2/3)
-    [SerializeField] private TextMeshProUGUI winText;        // Pantalla de victoria
+    [SerializeField] private TextMeshProUGUI scoreText;
+    [SerializeField] private TextMeshProUGUI cargoText;
+    [SerializeField] private TextMeshProUGUI winText;
 
     [Header("UI Botones")]
-    [SerializeField] private GameObject returnButton;       // Botón para volver al menú principal (Victoria)
+    [SerializeField] private GameObject returnButton;
 
     [Header("UI Derrota (Game Over)")]
-    [SerializeField] private GameObject gameOverPanel;      // Panel GameOver con imagen y botones
+    [SerializeField] private GameObject gameOverPanel;
+
+    [Header("UI Menú de Pausa")]
+    [SerializeField] private GameObject pausePanel;
+    [SerializeField] private Slider musicVolumeSlider;
+    private bool isPaused = false;
 
     [Header("Efectos de Audio")]
     [SerializeField] private AudioSource audioSource;
+    [SerializeField] private AudioSource musicaFondoAudioSource; // Arrastra MusicaFondo aquí
     [SerializeField] private AudioClip sonidoVictoria;
     [SerializeField] private AudioClip sonidoDerrota;
-    [SerializeField] private AudioClip sonidoDescargaBoya;   // Sonido al descargar residuos en la boya
+    [SerializeField] private AudioClip sonidoDescargaBoya;
+
+    [Header("Efecto Visual Océano Limpio (Transición)")]
+    [SerializeField] private Camera mainCam;
+    [SerializeField] private SpriteRenderer fondoSprite;
+    [SerializeField] private Light2D luzGlobal2D;
+    [SerializeField] private Color aguaLimpiaColor = new Color(0.12f, 0.72f, 0.85f, 1f);
+    [SerializeField] private float duracionAclarado = 2.5f;
 
     private int ecoCredits = 0;
     private int totalRecycled = 0;
     private string activePlayerName = "Player";
+    private bool isGameWon = false;
 
     void Awake()
     {
@@ -38,19 +55,24 @@ public class GameManager : MonoBehaviour
             Destroy(gameObject);
         }
 
-        // Si no se asignó en el Inspector, busca el componente en el mismo GameObject
         if (audioSource == null)
         {
             audioSource = GetComponent<AudioSource>();
         }
+
+        if (mainCam == null)
+        {
+            mainCam = Camera.main;
+        }
+
+        BuscarAudioMusica();
     }
 
     void Start()
     {
-        // Reanudar el tiempo si venía pausado de una partida previa
         Time.timeScale = 1f;
+        isPaused = false;
 
-        // 1. Obtener el nombre del jugador (busca primero en PlayerPrefs y luego en MenuManager)
         if (PlayerPrefs.HasKey("PlayerName"))
         {
             activePlayerName = PlayerPrefs.GetString("PlayerName");
@@ -60,40 +82,99 @@ public class GameManager : MonoBehaviour
             activePlayerName = MenuManager.Instance.playerName;
         }
 
-        // Ocultar texto de victoria y botón de retorno al inicio
-        if (winText != null)
+        if (winText != null) winText.gameObject.SetActive(false);
+        if (returnButton != null) returnButton.SetActive(false);
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
+        if (pausePanel != null) pausePanel.SetActive(false);
+
+        // Inicializar volumen y slider
+        float volumenGuardado = PlayerPrefs.GetFloat("MusicaVolumen", 0.5f);
+        if (volumenGuardado <= 0.05f) volumenGuardado = 0.5f;
+
+        if (musicVolumeSlider != null)
         {
-            winText.gameObject.SetActive(false);
+            musicVolumeSlider.value = volumenGuardado;
         }
 
-        if (returnButton != null)
-        {
-            returnButton.SetActive(false);
-        }
-
-        // Asegurar que el panel de Game Over comience desactivado
-        if (gameOverPanel != null)
-        {
-            gameOverPanel.SetActive(false);
-        }
-
+        CambiarVolumenMusica(volumenGuardado);
         UpdateScoreUI();
+    }
+
+    void Update()
+    {
+        // Abrir y cerrar pausa con la tecla Escape (ESC)
+        if (Input.GetKeyDown(KeyCode.Escape) && !isGameWon && (gameOverPanel == null || !gameOverPanel.activeSelf))
+        {
+            if (isPaused)
+            {
+                ReanudarJuego();
+            }
+            else
+            {
+                PausarJuego();
+            }
+        }
+
+        if (!isGameWon)
+        {
+            CheckWinCondition();
+        }
+    }
+
+    public void PausarJuego()
+    {
+        isPaused = true;
+        if (pausePanel != null) pausePanel.SetActive(true);
+        Time.timeScale = 0f;
+    }
+
+    public void ReanudarJuego()
+    {
+        isPaused = false;
+        if (pausePanel != null) pausePanel.SetActive(false);
+        Time.timeScale = 1f;
+    }
+
+    private void BuscarAudioMusica()
+    {
+        if (musicaFondoAudioSource == null)
+        {
+            GameObject obj = GameObject.Find("MusicaFondo");
+            if (obj != null)
+            {
+                musicaFondoAudioSource = obj.GetComponent<AudioSource>();
+            }
+        }
+    }
+
+    // Llamado por el Slider (Dynamic float)
+    public void CambiarVolumenMusica(float nuevoVolumen)
+    {
+        BuscarAudioMusica();
+
+        if (musicaFondoAudioSource != null)
+        {
+            musicaFondoAudioSource.volume = nuevoVolumen;
+        }
+
+        // Control maestro de audio de Unity
+        AudioListener.volume = nuevoVolumen;
+
+        PlayerPrefs.SetFloat("MusicaVolumen", nuevoVolumen);
+        PlayerPrefs.Save();
     }
 
     public void DepositTrash(int amount)
     {
         totalRecycled += amount;
-        ecoCredits += amount * 10; // Cada residuo otorga 10 EcoCréditos
+        ecoCredits += amount * 10;
 
-        // Reproducir sonido de caja registradora / éxito al descargar
         if (audioSource != null && sonidoDescargaBoya != null)
         {
             audioSource.PlayOneShot(sonidoDescargaBoya);
         }
 
-        // Guardar récord en tiempo real
         GuardarRecordLocal(ecoCredits);
-
         UpdateScoreUI();
         CheckWinCondition();
     }
@@ -114,12 +195,19 @@ public class GameManager : MonoBehaviour
         }
     }
 
-    private void CheckWinCondition()
+    public void CheckWinCondition()
     {
-        // Se gana cuando no queda basura flotando en el mar
-        GameObject[] remainingTrash = GameObject.FindGameObjectsWithTag("Trash");
+        if (isGameWon) return;
 
-        if (remainingTrash.Length == 0)
+        int remainingTrash = GameObject.FindGameObjectsWithTag("Trash").Length;
+        int remainingHazards = GameObject.FindGameObjectsWithTag("Hazard").Length;
+        int remainingEnemies = GameObject.FindGameObjectsWithTag("Enemigo").Length;
+        int totalThreats = remainingHazards + remainingEnemies;
+
+        PlayerController player = Object.FindAnyObjectByType<PlayerController>();
+        int cargoActual = (player != null) ? player.CurrentCargo : 0;
+
+        if (remainingTrash == 0 && totalThreats == 0 && cargoActual == 0)
         {
             ShowVictory();
         }
@@ -127,9 +215,11 @@ public class GameManager : MonoBehaviour
 
     private void ShowVictory()
     {
+        isGameWon = true;
         GuardarRecordLocal(ecoCredits);
 
-        // Reproducir sonido de victoria
+        StartCoroutine(TransicionAguaLimpia());
+
         if (audioSource != null && sonidoVictoria != null)
         {
             audioSource.PlayOneShot(sonidoVictoria);
@@ -138,58 +228,85 @@ public class GameManager : MonoBehaviour
         if (winText != null)
         {
             winText.gameObject.SetActive(true);
-            winText.text = $"¡ZONA DESCONTAMINADA!\n¡Excelente trabajo, {activePlayerName}!\nODS 14 Cumplido\nEcoCréditos obtenidos: {ecoCredits}";
+            winText.text = $"¡OCÉANO TOTALMENTE DESCONTAMINADO!\n¡Gran trabajo, {activePlayerName}!\nAmenazas neutralizadas y residuos reciclados\nODS 14 Cumplido | EcoCréditos: {ecoCredits}";
         }
 
-        // Activar el botón de regreso al menú
         if (returnButton != null)
         {
             returnButton.SetActive(true);
         }
     }
 
-    // Se ejecuta al agotarse la batería o por daño letal
+    private IEnumerator TransicionAguaLimpia()
+    {
+        float tiempo = 0f;
+
+        Color camInicio = (mainCam != null) ? mainCam.backgroundColor : Color.black;
+        Color spriteInicio = (fondoSprite != null) ? fondoSprite.color : Color.white;
+        float luzInicio = (luzGlobal2D != null) ? luzGlobal2D.intensity : 0.4f;
+
+        while (tiempo < duracionAclarado)
+        {
+            tiempo += Time.deltaTime;
+            float t = tiempo / duracionAclarado;
+
+            if (mainCam != null)
+            {
+                mainCam.backgroundColor = Color.Lerp(camInicio, aguaLimpiaColor, t);
+            }
+
+            if (fondoSprite != null)
+            {
+                fondoSprite.color = Color.Lerp(spriteInicio, Color.white, t);
+            }
+
+            if (luzGlobal2D != null)
+            {
+                luzGlobal2D.intensity = Mathf.Lerp(luzInicio, 1.0f, t);
+                luzGlobal2D.color = Color.Lerp(luzGlobal2D.color, Color.white, t);
+            }
+
+            yield return null;
+        }
+    }
+
     public void GameOver()
     {
+        if (isGameWon) return;
+
         GuardarRecordLocal(ecoCredits);
 
-        // Reproducir sonido de derrota
         if (audioSource != null && sonidoDerrota != null)
         {
             audioSource.PlayOneShot(sonidoDerrota);
         }
 
-        // Muestra el panel con los botones de Reintentar y Volver al Menú
         if (gameOverPanel != null)
         {
             gameOverPanel.SetActive(true);
-            Time.timeScale = 0f; // Pausa el juego
+            Time.timeScale = 0f;
         }
         else if (winText != null)
         {
-            // Plan de respaldo por si el panel no fue asignado
             winText.gameObject.SetActive(true);
             winText.text = $"FIN DE LA MISIÓN\nJugador: {activePlayerName}\nEcoCréditos finales: {ecoCredits}";
             if (returnButton != null) returnButton.SetActive(true);
         }
     }
 
-    // Método para el botón REINTENTAR dentro del GameOverPanel
     public void ReiniciarNivel()
     {
-        Time.timeScale = 1f; // Reanuda el tiempo antes de recargar
+        Time.timeScale = 1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name);
     }
 
-    // Método para cargar la escena de Menú (índice 0 en Build Settings)
     public void ReturnToMenu()
     {
-        Time.timeScale = 1f; // Reanuda el tiempo antes de regresar
+        Time.timeScale = 1f;
         GuardarRecordLocal(ecoCredits);
         SceneManager.LoadScene(0);
     }
 
-    // Método auxiliar seguro para almacenar récord
     private void GuardarRecordLocal(int puntaje)
     {
         int recordActual = PlayerPrefs.GetInt("RecordEcoCredits", 0);
